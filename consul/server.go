@@ -128,6 +128,10 @@ type Server struct {
 	// which SHOULD only consist of Consul servers
 	serfWAN *serf.Serf
 
+	// tombstoneGC is used to track the pending GC invocations
+	// for the KV tombstones
+	tombstoneGC *TombstoneGC
+
 	shutdown     bool
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
@@ -183,6 +187,12 @@ func NewServer(config *Config) (*Server, error) {
 	// Create a logger
 	logger := log.New(config.LogOutput, "", log.LstdFlags)
 
+	// Create the tombstone GC
+	gc, err := NewTombstoneGC(config.TombstoneTTL, config.TombstoneTTLGranularity)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create server
 	s := &Server{
 		config:        config,
@@ -195,6 +205,7 @@ func NewServer(config *Config) (*Server, error) {
 		remoteConsuls: make(map[string][]*serverParts),
 		rpcServer:     rpc.NewServer(),
 		rpcTLS:        incomingTLS,
+		tombstoneGC:   gc,
 		shutdownCh:    make(chan struct{}),
 	}
 
@@ -311,7 +322,7 @@ func (s *Server) setupRaft() error {
 
 	// Create the FSM
 	var err error
-	s.fsm, err = NewFSM(statePath, s.config.LogOutput)
+	s.fsm, err = NewFSM(s.tombstoneGC, statePath, s.config.LogOutput)
 	if err != nil {
 		return err
 	}
