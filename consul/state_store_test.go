@@ -11,7 +11,7 @@ import (
 )
 
 func testStateStore() (*StateStore, error) {
-	return NewStateStore(os.Stderr)
+	return NewStateStore(nil, os.Stderr)
 }
 
 func TestEnsureRegistration(t *testing.T) {
@@ -1399,6 +1399,14 @@ func TestKVSDelete(t *testing.T) {
 	}
 	defer store.Close()
 
+	ttl := 10 * time.Millisecond
+	gran := 5 * time.Millisecond
+	gc, err := NewTombstoneGC(ttl, gran)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	store.gc = gc
+
 	// Create the entry
 	d := &structs.DirEntry{Key: "/foo", Flags: 42, Value: []byte("test")}
 	if err := store.KVSSet(1000, d); err != nil {
@@ -1420,6 +1428,16 @@ func TestKVSDelete(t *testing.T) {
 	}
 	if d != nil {
 		t.Fatalf("bad: %v", d)
+	}
+
+	// Check that we get a delete
+	select {
+	case idx := <-gc.ExpireCh():
+		if idx != 1020 {
+			t.Fatalf("bad %d", idx)
+		}
+	case <-time.After(20 * time.Millisecond):
+		t.Fatalf("should expire")
 	}
 }
 
@@ -1723,6 +1741,14 @@ func TestKVSDeleteTree(t *testing.T) {
 	}
 	defer store.Close()
 
+	ttl := 10 * time.Millisecond
+	gran := 5 * time.Millisecond
+	gc, err := NewTombstoneGC(ttl, gran)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	store.gc = gc
+
 	// Should not exist
 	err = store.KVSDeleteTree(1000, "/web")
 	if err != nil {
@@ -1759,6 +1785,16 @@ func TestKVSDeleteTree(t *testing.T) {
 	}
 	if len(ents) != 0 {
 		t.Fatalf("bad: %v", ents)
+	}
+
+	// Check that we get a delete
+	select {
+	case idx := <-gc.ExpireCh():
+		if idx != 1010 {
+			t.Fatalf("bad %d", idx)
+		}
+	case <-time.After(20 * time.Millisecond):
+		t.Fatalf("should expire")
 	}
 }
 
